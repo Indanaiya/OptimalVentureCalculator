@@ -10,17 +10,17 @@ from datetime import datetime, timedelta
 #Item.csv gives all the information about the items
 
 #TODO check that the server is valid
+#TODO check that the csvs don't need updating. Maybe try automatically updating them
 
 cached_prices_address = "../res/cachedPrices.json"
 job_to_ClassJobCategory = {'DoW/M': 34, 'MIN':17, 'BTN':18, 'FSH':19}#For retainer task
-#ClassJobCategory_to_job = {v:k for k,v in job_to_ClassJobCategory.items()}
 
 class RetainerOptimiser():
-    def __init__(self, server='Cerberus'):
+    def __init__(self, server='Chaos'):
         self.retainer_task_dicts = []
         self.retainer_task_normal_dicts = {}
         self.item_dicts = {}
-        self.universalis_handler = UniversalisHandler(server, update=False)
+        self.universalis_handler = UniversalisHandler(server, update=True)
 
         with open('../res/RetainerTask.csv', 'r', encoding="UTF-8-sig") as f:
             reader = csv.DictReader(f)
@@ -38,10 +38,26 @@ class RetainerOptimiser():
     def savePrices(self):
         self.universalis_handler.save()
 
-    def getMining(self, level=1, gathering=0, quantity=2):
+    def getVentures(self, level=1, gathering=0, ilvl=0, quantity=2, job=None):
         ventures = []
+        if not job in job_to_ClassJobCategory.keys():
+            raise KeyError
+
+        def isValidGathererVenture(element):
+            return int(element['ClassJobCategory']) == job_to_ClassJobCategory[job] and int(element['RequiredGathering']) <= gathering and int(element['RetainerLevel']) <= level and element['VentureCost'] == '1'
+
+        def isValidCombatVenture(element):
+            return int(element['ClassJobCategory']) == job_to_ClassJobCategory['DoW/M'] and int(element['RequiredItemLevel']) <= ilvl and int(element['RetainerLevel']) <= level and element['VentureCost'] == '1'
+
+        if job == "DoW/M":
+            isValidVenture = isValidCombatVenture
+        elif job == "MIN" or job == "BTN" or job == "FSH":
+            isValidVenture = isValidGathererVenture
+        else:
+            raise ValueError("Job not recognised")
+
         for element in self.retainer_task_dicts[2:]:
-            if int(element['ClassJobCategory']) == job_to_ClassJobCategory['MIN'] and int(element['RequiredGathering']) <= gathering and int(element['RetainerLevel']) <= level and element['VentureCost'] == '1':
+            if isValidVenture(element):
                 task_id = element['Task']
                 item_id = self.retainer_task_normal_dicts[task_id]['Item']
                 if item_id != '0':
@@ -83,7 +99,7 @@ class RetainerOptimiser():
         header_price = "Income per Venture"
         price_colwidth = max([len(str(v['price'])) for v in ventures] + [len(header_price)])
         header_title = f"{header_retainer_level:>{retainer_level_colwidth}} | {header_item_name:^{item_name_colwidth}} | {header_price:<{price_colwidth}}"
-        data_to_print = [f"{v['retainer_level']:>{retainer_level_colwidth}} | {v['item_name']:^{item_name_colwidth}} | {str(v['income_per_venture']):<{price_colwidth}}" for v in ventures]
+        data_to_print = [f"{v['retainer_level']:>{retainer_level_colwidth}} | {(v['item_name']):^{item_name_colwidth}} | {str(v['income_per_venture']):<{price_colwidth}}" for v in ventures]
         print(header_title)
         print(*["=" for i in range(max([len(string) for string in data_to_print] + [len(header_title)]))], sep="") #Prints enough = to cover the width of the widest point of the table
         print(*data_to_print, sep="\n")
@@ -136,5 +152,7 @@ class PageNotFoundError(Exception):
 
 if __name__ == "__main__":
     ro = RetainerOptimiser()
-    ro.getMining(level=20, gathering=5000)
+    ro.getVentures(level=80, gathering=5000, job="MIN")
+    ro.getVentures(level=80, ilvl=500, job="DoW/M")
+    ro.getVentures(level=80, gathering=5000, job="FSH")
     ro.savePrices() #Necessary if you want to save Universalis data to cache

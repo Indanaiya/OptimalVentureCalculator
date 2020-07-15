@@ -46,11 +46,25 @@ class RetainerOptimiser():
                 item_id = self.retainer_task_normal_dicts[venture_id]['Item']
                 item_name = self.item_dicts[item_id]['0']
                 item_quantity = self.retainer_task_normal_dicts[venture_id][f"Quantity[{quantity}]"]
-                ventures.append({'item_id': item_id, 'item_name': item_name, 'venture_id': venture_id, 'item_quantity': item_quantity})
+                retainer_level = element['RetainerLevel']
+                ventures.append({'item_id': item_id, 'item_name': item_name, 'retainer_level': retainer_level, 'item_quantity': item_quantity})   
         for v in ventures:
             v['price'] = self.universalis_handler.getUniversalisPrice(v['item_id'])
-        for v in ventures:
-            print(v)
+
+        ventures = sorted(ventures, key=lambda x: x['price']*x['item_quantity'], reverse=True)
+        #Display:
+        #TODO Can I collate all these for v in ventures?
+        header_retainer_level = "Retainer Level"
+        retainer_level_colwidth = max([len(v['retainer_level']) for v in ventures] + [len(header_retainer_level)])
+        header_item_name = "Item (Quantity)"
+        item_name_colwidth = max([len(v['item_name']) for v in ventures] + [len(header_item_name)])
+        header_price = "Income per Venture"
+        price_colwidth = max([len(str(v['price'])) for v in ventures] + [len(header_price)])
+        header_title = f"{header_retainer_level:>{retainer_level_colwidth}} | {header_item_name:^{item_name_colwidth}} | {header_price:<{price_colwidth}}"
+        data_to_print = [f"{v['retainer_level']:>{retainer_level_colwidth}} | {v['item_name']:^{item_name_colwidth}} | {v['price']*int(v['item_quantity']):<{price_colwidth}}" for v in ventures]
+        print(header_title)
+        print(*["=" for i in range(max([len(string) for string in data_to_print] + [len(header_title)]))], sep="") #Prints enough = to cover the width of the widest point of the table
+        print(*data_to_print, sep="\n")
 
 class UniversalisHandler():
     def __init__(self, server, update=True):

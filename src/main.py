@@ -22,6 +22,7 @@ class RetainerOptimiser():
         self.item_dicts = {}
         self.universalis_handler = UniversalisHandler(server, update=True)
 
+        #Read the CSV files (Assumes they exist. The program can't work without them anyway so it's not a big deal)
         with open('../res/RetainerTask.csv', 'r', encoding="UTF-8-sig") as f:
             reader = csv.DictReader(f)
             for l in reader:
@@ -36,18 +37,22 @@ class RetainerOptimiser():
                 self.item_dicts[l['key']] = l
 
     def savePrices(self):
+        """Tell the universalis handler to save all stored information to the cache json file"""
         self.universalis_handler.save()
 
     def getVentures(self, level=1, gathering=0, ilvl=0, quantity=2, job=None):
+        """Print a list of all ventures given the restrictions, in order of most money per venture to least money per venture"""
         ventures = []
         if not job in job_to_ClassJobCategory.keys():
             raise KeyError
 
-        def isValidGathererVenture(element):
-            return int(element['ClassJobCategory']) == job_to_ClassJobCategory[job] and int(element['RequiredGathering']) <= gathering and int(element['RetainerLevel']) <= level and element['VentureCost'] == '1'
+        def isValidGathererVenture(venture):
+            """Check if the DoL retainer can do this venture. Returns a boolean"""
+            return int(venture['ClassJobCategory']) == job_to_ClassJobCategory[job] and int(venture['RequiredGathering']) <= gathering and int(venture['RetainerLevel']) <= level and venture['VentureCost'] == '1'
 
-        def isValidCombatVenture(element):
-            return int(element['ClassJobCategory']) == job_to_ClassJobCategory['DoW/M'] and int(element['RequiredItemLevel']) <= ilvl and int(element['RetainerLevel']) <= level and element['VentureCost'] == '1'
+        def isValidCombatVenture(venture):
+            """Check if the DoW/M retainer can do this venture. Returns a boolean"""
+            return int(venture['ClassJobCategory']) == job_to_ClassJobCategory['DoW/M'] and int(venture['RequiredItemLevel']) <= ilvl and int(venture['RetainerLevel']) <= level and venture['VentureCost'] == '1'
 
         if job == "DoW/M":
             isValidVenture = isValidCombatVenture
@@ -56,30 +61,30 @@ class RetainerOptimiser():
         else:
             raise ValueError("Job not recognised")
 
-        for element in self.retainer_task_dicts[2:]:
-            if isValidVenture(element):
-                task_id = element['Task']
+        for venture in self.retainer_task_dicts[2:]:#Iterate through every single venture in the game
+            if isValidVenture(venture): #Can this venture be done by the retainer?
+                task_id = venture['Task']
                 item_id = self.retainer_task_normal_dicts[task_id]['Item']
-                if item_id != '0':
+                if item_id != '0': #If the id is zero then this venture doesn't reward anything
                     item_name = self.item_dicts[item_id]['0']
                     item_quantity = self.retainer_task_normal_dicts[task_id][f"Quantity[{quantity}]"]
-                    retainer_level = element['RetainerLevel']
+                    retainer_level = venture['RetainerLevel']
                     ventures.append({'item_id': item_id, 'item_name': item_name, 'retainer_level': retainer_level, 'item_quantity': item_quantity}) 
 
         for v in ventures:
             try:
-                v['price'] = self.universalis_handler.getUniversalisPrice(v['item_id'])
-                if v['price']:
+                v['price'] = self.universalis_handler.getUniversalisPrice(v['item_id']) #Get the price of the item given by this venture
+                if v['price']: #Did getUnviersalisPrice return a price?
                     v['income_per_venture'] = v['price'] * int(v['item_quantity'])
                 else:
                     v['income_per_venture'] = None
-            except PageNotFoundError:
+            except PageNotFoundError: #Universalis returned a 404. Probably because the item id was invalid
                 print(f"404: {v}")
                 v['price'] = None
                 v['income_per_venture'] = None
 
         def sortByIncomePerVenture(venture):
-            #return (0, venture['income_per_venture'])[bool(venture['income_per_venture'])]
+            """Return the income_per_venture if this venture has it, or 0 if it does not."""
             try:
                 if venture['income_per_venture']:
                     return venture['income_per_venture']
@@ -89,7 +94,7 @@ class RetainerOptimiser():
                 print(venture)
                 raise e
 
-        ventures = sorted(ventures, key=sortByIncomePerVenture, reverse=True)
+        ventures = sorted(ventures, key=sortByIncomePerVenture, reverse=True) #Sort all the ventures with the highest income ventures first, and the lowest income ventures last
         #Display:
         #TODO Can I collate all these for v in ventures?
         header_retainer_level = "Retainer Level"
@@ -126,7 +131,7 @@ class UniversalisHandler():
             self.prices[self.server] = {}
 
         item_id_in_prices = item_id in self.prices[self.server]
-        #Data fetched from universalis if there is no data for this item, or if the data we have is outdated, and self.update is True
+        #Data fetched from universalis if there is no data for this item, or if the data we have is outdated and self.update is True
         if not item_id_in_prices or ((datetime.strptime(self.prices[self.server][item_id]['time'], "%Y-%m-%dT%H:%M:%S")) < (datetime.now() - timedelta(days=self.cache_ttl)) and self.update):
             print(f"Fetching {item_id} from Universalis")
             with requests.request("GET", self.universalis_url + item_id + "?entries=1") as response:
@@ -148,6 +153,7 @@ class UniversalisHandler():
                 json.dump(self.prices, f)
 
 class PageNotFoundError(Exception):
+    """Website returned a 404 error"""
     pass
 
 if __name__ == "__main__":

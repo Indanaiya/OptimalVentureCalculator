@@ -1,5 +1,4 @@
-key,0,1,2,3,4,5
-#,Item,Quantity[0],Quantity[1],Quantity[2],GatheringLog,FishingLog
+key,Item,Quantity[0],Quantity[1],Quantity[2],GatheringLog,FishingLog
 int32,Item,byte,byte,byte,GatheringItem,Row
 0,0,0,0,0,0,0
 1,5291,5,7,10,0,0

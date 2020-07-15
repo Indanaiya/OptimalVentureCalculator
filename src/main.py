@@ -42,16 +42,38 @@ class RetainerOptimiser():
         ventures = []
         for element in self.retainer_task_dicts[2:]:
             if int(element['ClassJobCategory']) == job_to_ClassJobCategory['MIN'] and int(element['RequiredGathering']) <= gathering and int(element['RetainerLevel']) <= level and element['VentureCost'] == '1':
-                venture_id = element['key']
-                item_id = self.retainer_task_normal_dicts[venture_id]['Item']
-                item_name = self.item_dicts[item_id]['0']
-                item_quantity = self.retainer_task_normal_dicts[venture_id][f"Quantity[{quantity}]"]
-                retainer_level = element['RetainerLevel']
-                ventures.append({'item_id': item_id, 'item_name': item_name, 'retainer_level': retainer_level, 'item_quantity': item_quantity})   
-        for v in ventures:
-            v['price'] = self.universalis_handler.getUniversalisPrice(v['item_id'])
+                task_id = element['Task']
+                item_id = self.retainer_task_normal_dicts[task_id]['Item']
+                if item_id != '0':
+                    item_name = self.item_dicts[item_id]['0']
+                    item_quantity = self.retainer_task_normal_dicts[task_id][f"Quantity[{quantity}]"]
+                    retainer_level = element['RetainerLevel']
+                    ventures.append({'item_id': item_id, 'item_name': item_name, 'retainer_level': retainer_level, 'item_quantity': item_quantity}) 
 
-        ventures = sorted(ventures, key=lambda x: x['price']*x['item_quantity'], reverse=True)
+        for v in ventures:
+            try:
+                v['price'] = self.universalis_handler.getUniversalisPrice(v['item_id'])
+                if v['price']:
+                    v['income_per_venture'] = v['price'] * int(v['item_quantity'])
+                else:
+                    v['income_per_venture'] = None
+            except PageNotFoundError:
+                print(f"404: {v}")
+                v['price'] = None
+                v['income_per_venture'] = None
+
+        def sortByIncomePerVenture(venture):
+            #return (0, venture['income_per_venture'])[bool(venture['income_per_venture'])]
+            try:
+                if venture['income_per_venture']:
+                    return venture['income_per_venture']
+                else:
+                    return 0
+            except Exception as e:
+                print(venture)
+                raise e
+
+        ventures = sorted(ventures, key=sortByIncomePerVenture, reverse=True)
         #Display:
         #TODO Can I collate all these for v in ventures?
         header_retainer_level = "Retainer Level"
@@ -61,7 +83,7 @@ class RetainerOptimiser():
         header_price = "Income per Venture"
         price_colwidth = max([len(str(v['price'])) for v in ventures] + [len(header_price)])
         header_title = f"{header_retainer_level:>{retainer_level_colwidth}} | {header_item_name:^{item_name_colwidth}} | {header_price:<{price_colwidth}}"
-        data_to_print = [f"{v['retainer_level']:>{retainer_level_colwidth}} | {v['item_name']:^{item_name_colwidth}} | {v['price']*int(v['item_quantity']):<{price_colwidth}}" for v in ventures]
+        data_to_print = [f"{v['retainer_level']:>{retainer_level_colwidth}} | {v['item_name']:^{item_name_colwidth}} | {str(v['income_per_venture']):<{price_colwidth}}" for v in ventures]
         print(header_title)
         print(*["=" for i in range(max([len(string) for string in data_to_print] + [len(header_title)]))], sep="") #Prints enough = to cover the width of the widest point of the table
         print(*data_to_print, sep="\n")
@@ -92,8 +114,13 @@ class UniversalisHandler():
         if not item_id_in_prices or ((datetime.strptime(self.prices[self.server][item_id]['time'], "%Y-%m-%dT%H:%M:%S")) < (datetime.now() - timedelta(days=self.cache_ttl)) and self.update):
             print(f"Fetching {item_id} from Universalis")
             with requests.request("GET", self.universalis_url + item_id + "?entries=1") as response:
+                if response.status_code == 404:
+                    raise PageNotFoundError()
+                response_dict = response.json()
+                if not response_dict['listings']:
+                    return None
                 self.prices[self.server][item_id] = {}
-                self.prices[self.server][item_id]['price'] = response.json()['listings'][0]['pricePerUnit']
+                self.prices[self.server][item_id]['price'] = response_dict['listings'][0]['pricePerUnit']
                 self.prices[self.server][item_id]['time'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
         return self.prices[self.server][item_id]['price']
@@ -103,9 +130,11 @@ class UniversalisHandler():
         if self.prices != {}:
             with open(cached_prices_address, 'w') as f:
                 json.dump(self.prices, f)
-        
+
+class PageNotFoundError(Exception):
+    pass
 
 if __name__ == "__main__":
     ro = RetainerOptimiser()
-    ro.getMining(level=10)
+    ro.getMining(level=20, gathering=5000)
     ro.savePrices() #Necessary if you want to save Universalis data to cache

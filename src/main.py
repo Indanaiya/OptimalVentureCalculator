@@ -95,6 +95,7 @@ class RetainerOptimiser():
                 raise e
 
         ventures = sorted(ventures, key=sortByIncomePerVenture, reverse=True) #Sort all the ventures with the highest income ventures first, and the lowest income ventures last
+        
         #Display:
         #TODO Can I collate all these for v in ventures?
         header_retainer_level = "Retainer Level"
@@ -112,7 +113,7 @@ class RetainerOptimiser():
 class UniversalisHandler():
     def __init__(self, server, update=True):
         self.prices = self.getCachedPrices()
-        self.cache_ttl = 3 #The time to live of cached data (in days)
+        self.cache_ttl = 0.5 #The time to live of cached data (in days)
         self.server = server
         self.universalis_url = f"https://universalis.app/api/{server}/"
         self.update = update #Prevents fetching more data from Unviversalis if False and the data needed is present in cache just outdated
@@ -160,5 +161,5 @@ if __name__ == "__main__":
     ro = RetainerOptimiser()
     ro.getVentures(level=80, gathering=5000, job="MIN")
     ro.getVentures(level=80, ilvl=500, job="DoW/M")
-    ro.getVentures(level=80, gathering=5000, job="FSH")
+    #ro.getVentures(level=80, gathering=5000, job="FSH")
     ro.savePrices() #Necessary if you want to save Universalis data to cache

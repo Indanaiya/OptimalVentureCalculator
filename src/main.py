@@ -1,16 +1,12 @@
-import json
 import sys
-import requests
 import csv
-import os
-from datetime import datetime, timedelta
+import aiohttp
+from lib.universalis_handler import *
 
-#RetainerTask.csv shows the gathering/ilvl requirement, the time and venture cost, as well as the needed retainer level and class
-#RetainerTaskNormal.csv shows what items a venture gives and how many of that item
-#Item.csv gives all the information about the items
-
-#TODO check that the server is valid
-#TODO check that the csvs don't need updating. Maybe try automatically updating them
+# RetainerTask.csv shows the gathering/ilvl requirement, the time and venture cost, as well as the needed retainer level and class
+# RetainerTaskNormal.csv shows what items a venture gives and how many of that item
+# Item.csv gives all the information about the items
+# All csv files are from https://github.com/KariArisu/FFXIVDatamine/tree/master
 
 CACHED_PRICES_ADDRESS = "res/cachedPrices.json"
 RETAINER_TASK_ADDRESS = "res/RetainerTask.csv"
@@ -23,7 +19,10 @@ class RetainerOptimiser():
         self.retainer_task_dicts = []
         self.retainer_task_normal_dicts = {}
         self.item_dicts = {}
-        self.universalis_handler = UniversalisHandler(server, update=True)
+        self.session = aiohttp.ClientSession()
+        self.universalis_handler = UniversalisHandler(lambda response_dict : {
+        'price': response_dict['listings'][0]['pricePerUnit'],
+    }, CACHED_PRICES_ADDRESS, self.session, server=server, update=True)
 
         # Read the CSV files (Assumes they exist. I could handle their absence more gracefully but crashing works well enough for personal use)
         with open(RETAINER_TASK_ADDRESS, 'r', encoding="UTF-8-sig") as f:
@@ -39,13 +38,18 @@ class RetainerOptimiser():
             for l in reader:
                 self.item_dicts[l['key']] = l
 
-    def savePrices(self):
-        """Tell the universalis handler to save all stored information to the cache json file"""
+    async def close(self):
         self.universalis_handler.save()
+        await self.session.close()
 
-    #TODO Explain what 'quantity' is
-    def getVentures(self, max_level=1, gathering=0, ilvl=0, quantity=2, job=None):
-        """Print a list of all ventures given the restrictions, in order of most money per venture to least money per venture"""
+    async def getVentures(self, max_level=1, gathering=0, ilvl=0, quantity=4, job=None):
+        """Print a list of all ventures given the restrictions, in order of most money per venture to least money per venture
+        
+        :param int max_level: List ventures up to and including this level
+        :param int gathering: For MIN, BTN, and FSH ventures, list ventures requiring this much gathering stat or less
+        :param int ilvl: For DoW/M ventures, list ventures requiring this ilvl or less
+        :param int quantity: Ventures can give a range of four different quantities of the item they reward depending on the retainer's ilvl (for DoW/M) or perception (for gathering classes). 1 is the lowest category and 4 is the highest.
+        """
         ventures = []
         if not job in JOB_TO_CLASS_JOB_CATEGORY.keys():
             raise KeyError
@@ -65,11 +69,11 @@ class RetainerOptimiser():
         else:
             raise ValueError("Job not recognised")
 
-        for venture in self.retainer_task_dicts[2:]:#Iterate through every single venture in the game
-            if isValidVenture(venture): #Can this venture be done by the retainer?
+        for venture in self.retainer_task_dicts[2:]: # Iterate through every single venture in the game
+            if isValidVenture(venture): 
                 task_id = venture['Task']
                 item_id = self.retainer_task_normal_dicts[task_id]['Item']
-                if item_id != '0': #If the id is zero then this venture doesn't reward anything
+                if item_id != '0': # If the id is zero then this venture doesn't reward anything
                     item_name = self.item_dicts[item_id]['0']
                     item_quantity = self.retainer_task_normal_dicts[task_id][f"Quantity[{quantity}]"]
                     retainer_level = venture['RetainerLevel']
@@ -77,12 +81,12 @@ class RetainerOptimiser():
 
         for v in ventures:
             try:
-                v['price'] = self.universalis_handler.getUniversalisPrice(v['item_id']) #Get the price of the item given by this venture
-                if v['price']: #Did getUnviersalisPrice return a price?
+                v['price'] = await self.universalis_handler.get_universalis_price(v['item_id']) # Get the price of the item given by this venture
+                if v['price']: # Did getUnviersalisPrice return a price?
                     v['income_per_venture'] = v['price'] * int(v['item_quantity'])
                 else:
                     v['income_per_venture'] = None
-            except PageNotFoundError: #Universalis returned a 404. Probably because the item id was invalid
+            except PageNotFoundError: # Universalis returned a 404. Probably because the item id was invalid
                 print(f"404: {v}")
                 v['price'] = None
                 v['income_per_venture'] = None
@@ -98,10 +102,9 @@ class RetainerOptimiser():
                 print(venture)
                 raise e
 
-        ventures = sorted(ventures, key=sortByIncomePerVenture, reverse=True) #Sort all the ventures with the highest income ventures first, and the lowest income ventures last
+        ventures = sorted(ventures, key=sortByIncomePerVenture, reverse=True) # Sort all the ventures with the highest income ventures first, and the lowest income ventures last
         
-        #Display:
-        #TODO Can I collate all these for v in ventures?
+        # Display:
         header_retainer_level = "Retainer Level"
         retainer_level_colwidth = max([len(v['retainer_level']) for v in ventures] + [len(header_retainer_level)])
         header_item_name = "Item (Quantity)"
@@ -114,54 +117,7 @@ class RetainerOptimiser():
         print(*["=" for i in range(max([len(string) for string in data_to_print] + [len(header_title)]))], sep="") #Prints enough = to cover the width of the widest point of the table
         print(*data_to_print, sep="\n")
 
-class UniversalisHandler():
-    def __init__(self, server, update=True):
-        self.prices = self.getCachedPrices()
-        self.cache_ttl = 0.5 #The time to live of cached data (in days)
-        self.server = server
-        self.universalis_url = f"https://universalis.app/api/{server}/"
-        self.update = update #Prevents fetching more data from Unviversalis if False and the data needed is present in cache just outdated
-
-    def getCachedPrices(self):
-        """Load all item prices from cache"""
-        if os.path.isfile(CACHED_PRICES_ADDRESS):
-            with open(CACHED_PRICES_ADDRESS) as f:
-                return json.load(f)
-        else:
-            return {}
-
-    def getUniversalisPrice(self, item_id):
-        """Get the price for the given item, on the server which this class is set to get data from"""
-        if not self.server in self.prices:   
-            self.prices[self.server] = {}
-
-        item_id_in_prices = item_id in self.prices[self.server]
-        #Data fetched from universalis if there is no data for this item, or if the data we have is outdated and self.update is True
-        if not item_id_in_prices or ((datetime.strptime(self.prices[self.server][item_id]['time'], "%Y-%m-%dT%H:%M:%S")) < (datetime.now() - timedelta(days=self.cache_ttl)) and self.update):
-            print(f"Fetching {item_id} from Universalis")
-            with requests.request("GET", self.universalis_url + item_id + "?entries=1") as response:
-                if response.status_code == 404:
-                    raise PageNotFoundError()
-                response_dict = response.json()
-                if not response_dict['listings']:
-                    return None
-                self.prices[self.server][item_id] = {}
-                self.prices[self.server][item_id]['price'] = response_dict['listings'][0]['pricePerUnit']
-                self.prices[self.server][item_id]['time'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-
-        return self.prices[self.server][item_id]['price']
-
-    def save(self):
-        """Save stored item prices to cache"""
-        if self.prices != {}:
-            with open(CACHED_PRICES_ADDRESS, 'w') as f:
-                json.dump(self.prices, f)
-
-class PageNotFoundError(Exception):
-    """Website returned a 404 error"""
-    pass
-
-def run_program():
+async def run_program():
     if len(sys.argv) != 4:
         print("Please use program as [Program Name] [Job] [Level] [Gathering/iLvl]")
     else:
@@ -181,9 +137,5 @@ def run_program():
             print(f"{sys.argv[3]} must be a number")
     print(f"Finding {job} ventures at level {max_level} with {'iLvl' if job=='DoW/M' else 'gathering'} {gathering_ilvl} for Final Fantasy XIV version 7.05")
     ro = RetainerOptimiser()
-    ro.getVentures(max_level=max_level, ilvl=gathering_ilvl, gathering=gathering_ilvl, job=job)
-    ro.savePrices() #Necessary if you want to save Universalis data to cache
-
-
-if __name__ == "__main__":
-    run_program()
+    await ro.getVentures(max_level=max_level, ilvl=gathering_ilvl, gathering=gathering_ilvl, job=job)
+    await ro.close()

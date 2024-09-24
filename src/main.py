@@ -1,7 +1,7 @@
 import json
+import sys
 import requests
 import csv
-from pprint import pprint 
 import os
 from datetime import datetime, timedelta
 
@@ -12,8 +12,11 @@ from datetime import datetime, timedelta
 #TODO check that the server is valid
 #TODO check that the csvs don't need updating. Maybe try automatically updating them
 
-cached_prices_address = "../res/cachedPrices.json"
-job_to_ClassJobCategory = {'DoW/M': 34, 'MIN':17, 'BTN':18, 'FSH':19}#For retainer task
+CACHED_PRICES_ADDRESS = "res/cachedPrices.json"
+RETAINER_TASK_ADDRESS = "res/RetainerTask.csv"
+RETAINER_TASK_NORMAL_ADDRESS = "res/RetainerTaskNormal.csv"
+ITEM_ADDRESS = "res/Item.csv"
+JOB_TO_CLASS_JOB_CATEGORY = {'DoW/M': 34, 'MIN':17, 'BTN':18, 'FSH':19}
 
 class RetainerOptimiser():
     def __init__(self, server='Chaos'):
@@ -22,16 +25,16 @@ class RetainerOptimiser():
         self.item_dicts = {}
         self.universalis_handler = UniversalisHandler(server, update=True)
 
-        #Read the CSV files (Assumes they exist. The program can't work without them anyway so it's not a big deal)
-        with open('../res/RetainerTask.csv', 'r', encoding="UTF-8-sig") as f:
+        # Read the CSV files (Assumes they exist. I could handle their absence more gracefully but crashing works well enough for personal use)
+        with open(RETAINER_TASK_ADDRESS, 'r', encoding="UTF-8-sig") as f:
             reader = csv.DictReader(f)
             for l in reader:
                 self.retainer_task_dicts.append(l)
-        with open('../res/RetainerTaskNormal.csv', 'r', encoding="UTF-8-sig") as f:
+        with open(RETAINER_TASK_NORMAL_ADDRESS, 'r', encoding="UTF-8-sig") as f:
             reader = csv.DictReader(f)
             for l in reader:
                 self.retainer_task_normal_dicts[l['key']] = l
-        with open('../res/Item.csv', 'r', encoding="UTF-8-sig") as f:
+        with open(ITEM_ADDRESS, 'r', encoding="UTF-8-sig") as f:
             reader = csv.DictReader(f)
             for l in reader:
                 self.item_dicts[l['key']] = l
@@ -40,19 +43,20 @@ class RetainerOptimiser():
         """Tell the universalis handler to save all stored information to the cache json file"""
         self.universalis_handler.save()
 
-    def getVentures(self, level=1, gathering=0, ilvl=0, quantity=2, job=None):
+    #TODO Explain what 'quantity' is
+    def getVentures(self, max_level=1, gathering=0, ilvl=0, quantity=2, job=None):
         """Print a list of all ventures given the restrictions, in order of most money per venture to least money per venture"""
         ventures = []
-        if not job in job_to_ClassJobCategory.keys():
+        if not job in JOB_TO_CLASS_JOB_CATEGORY.keys():
             raise KeyError
 
         def isValidGathererVenture(venture):
             """Check if the DoL retainer can do this venture. Returns a boolean"""
-            return int(venture['ClassJobCategory']) == job_to_ClassJobCategory[job] and int(venture['RequiredGathering']) <= gathering and int(venture['RetainerLevel']) <= level and venture['VentureCost'] == '1'
+            return int(venture['ClassJobCategory']) == JOB_TO_CLASS_JOB_CATEGORY[job] and int(venture['RequiredGathering']) <= gathering and int(venture['RetainerLevel']) <= max_level and venture['VentureCost'] == '1'
 
         def isValidCombatVenture(venture):
             """Check if the DoW/M retainer can do this venture. Returns a boolean"""
-            return int(venture['ClassJobCategory']) == job_to_ClassJobCategory['DoW/M'] and int(venture['RequiredItemLevel']) <= ilvl and int(venture['RetainerLevel']) <= level and venture['VentureCost'] == '1'
+            return int(venture['ClassJobCategory']) == JOB_TO_CLASS_JOB_CATEGORY['DoW/M'] and int(venture['RequiredItemLevel']) <= ilvl and int(venture['RetainerLevel']) <= max_level and venture['VentureCost'] == '1'
 
         if job == "DoW/M":
             isValidVenture = isValidCombatVenture
@@ -120,8 +124,8 @@ class UniversalisHandler():
 
     def getCachedPrices(self):
         """Load all item prices from cache"""
-        if os.path.isfile(cached_prices_address):
-            with open(cached_prices_address) as f:
+        if os.path.isfile(CACHED_PRICES_ADDRESS):
+            with open(CACHED_PRICES_ADDRESS) as f:
                 return json.load(f)
         else:
             return {}
@@ -150,16 +154,36 @@ class UniversalisHandler():
     def save(self):
         """Save stored item prices to cache"""
         if self.prices != {}:
-            with open(cached_prices_address, 'w') as f:
+            with open(CACHED_PRICES_ADDRESS, 'w') as f:
                 json.dump(self.prices, f)
 
 class PageNotFoundError(Exception):
     """Website returned a 404 error"""
     pass
 
-if __name__ == "__main__":
+def run_program():
+    if len(sys.argv) != 4:
+        print("Please use program as [Program Name] [Job] [Level] [Gathering/iLvl]")
+    else:
+        job = sys.argv[1]
+        if not(job in JOB_TO_CLASS_JOB_CATEGORY.keys()):
+            print(f"First argument must be a valid job. {[job for job in JOB_TO_CLASS_JOB_CATEGORY.keys()]}")
+            return
+        try:
+            max_level = int(sys.argv[2])
+            if max_level < 1 or max_level > 100:
+                raise Exception()
+        except:
+            print(f"{sys.argv[2]} must be a number between 1 and 100 (inclusive)")
+        try:
+            gathering_ilvl = int(sys.argv[3])
+        except:
+            print(f"{sys.argv[3]} must be a number")
+    print(f"Finding {job} ventures at level {max_level} with {'iLvl' if job=='DoW/M' else 'gathering'} {gathering_ilvl} for Final Fantasy XIV version 7.05")
     ro = RetainerOptimiser()
-    ro.getVentures(level=80, gathering=5000, job="MIN")
-    ro.getVentures(level=80, ilvl=500, job="DoW/M")
-    #ro.getVentures(level=80, gathering=5000, job="FSH")
+    ro.getVentures(max_level=max_level, ilvl=gathering_ilvl, gathering=gathering_ilvl, job=job)
     ro.savePrices() #Necessary if you want to save Universalis data to cache
+
+
+if __name__ == "__main__":
+    run_program()

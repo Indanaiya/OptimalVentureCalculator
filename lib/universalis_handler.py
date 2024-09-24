@@ -28,6 +28,7 @@ class Throttle:
 class UniversalisHandler():
     def __init__(self, response_format, cached_prices_address, session, server="Chaos", update=True):
         self._format_response = response_format
+        self.session = session
         self.cached_prices_address = cached_prices_address
         self.prices = self._get_cached_prices()
         self.cache_ttl = 0.5  # The time to live of cached data (in days)
@@ -119,7 +120,7 @@ class UniversalisHandler():
                     self.save()
                     self.fetch_count = 0
         
-        return
+        return self.prices[self.server][item_id]
 
     def save(self):
         """Save stored item prices to cache"""

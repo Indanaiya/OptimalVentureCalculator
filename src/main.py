@@ -81,7 +81,7 @@ class RetainerOptimiser():
 
         for v in ventures:
             try:
-                v['price'] = await self.universalis_handler.get_universalis_price(v['item_id']) # Get the price of the item given by this venture
+                v['price'] = (await self.universalis_handler.get_universalis_price(v['item_id']))['price'] # Get the price of the item given by this venture
                 if v['price']: # Did getUnviersalisPrice return a price?
                     v['income_per_venture'] = v['price'] * int(v['item_quantity'])
                 else:
